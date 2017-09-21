@@ -3,11 +3,10 @@
 # <udf name="privip" label="private ip to install to eth0:0">
 
 logfile=/root/stackscript.log
-echo "Setting Hostname to ${HOSTNAME}" >> $logfile
-echo ${HOSTNAME} > /etc/hostname
-hostname -F /etc/hostname
-
-short=`echo ${HOSTNAME} | cut -d. -f1`
+# echo "Setting Hostname to ${HOSTNAME}" >> $logfile
+# echo ${HOSTNAME} > /etc/hostname
+# hostname -F /etc/hostname
+# short=`echo ${HOSTNAME} | cut -d. -f1`
 ip=`ip addr show label eth0 | grep 'inet ' | cut -d/ -f1 | awk '{print $2}'`
 echo "Setting ip to $ip for $short" >> $logfile
 echo -e "\n# our own entry\n${ip} ${HOSTNAME} ${short}" >> /etc/hosts
