@@ -14,7 +14,6 @@
 
 
 ## explain this program
-$(https://i.imgur.com/VUNAXV2.png
 ![explained](https://i.imgur.com/VUNAXV2.png "explained")
 
 
