@@ -1,0 +1,70 @@
+#!/bin/bash
+L_API_KEY="LINODE_API_KEY"
+L_LOCATION="shinagawa1" # Cloud location
+L_DIST="CentOS 7" #Set Distribution
+L_DEFAULT_PW="YOUR_SET_LINODE"
+L_STACKSCRIPT_ID="LINODE_STACKSCRIPT_INDEX" # defined Stackscript index
+L_DEFAULTNAME="LINODE_DEFAULT_NAME"
+L_GROUPNAME="LINODE_GROUPNAME"
+L_LOADBALANCER_NAME="LINODE_NODEBALANCER_NAME"
+L_LINODE_INDEX=$RANDOM
+
+add_cluster()
+{
+echo "[Info] Adding Cluster with ID $L_DEFAULTNAME$L_LINODE_INDEX.."
+#Expect API Error 8 => privip required => just create "Brand New" Linode
+#because linode create command must be have parameter imageid or distribution
+linode create $L_DEFAULTNAME$L_LINODE_INDEX --location $L_LOCATION  --plan linode1024  --group $L_GROUPNAME --distribution $L_DIST --password $L_DEFAULT_PW --stackscript $L_STACKSCRIPT_ID --stackscriptjson '{ "dummy": "test12345" }' --api-key $L_API_KEY
+echo "[Info] Assign private IP to $L_DEFAULTNAME$L_LINODE_INDEX.." 
+F_PRIV_IP_DATA=$(linode IP-Add $L_DEFAULTNAME$L_LINODE_INDEX --api-key $L_API_KEY --private) # Assign new private IP to node
+linode rebuild $L_DEFAULTNAME$L_LINODE_INDEX --distribution $L_DIST --password $L_DEFAULT_PW --stackscript $L_STACKSCRIPT_ID --distribution $L_DIST --stackscriptjson '{ "privip": "$F_PRIV_IP_DATA" }'  --api-key $L_API_KEY #build new node process with Stackscript
+F_PRIV_IP=$(echo $F_PRIV_IP_DATA | awk '{ print $3 }') 
+linode nodebalancer node-create backend-loadbalancer 80 app$L_LINODE_INDEX $F_PRIV_IP:80 --api-key $L_API_KEY
+linode nodebalancer node-create backend-loadbalancer 443 app$L_LINODE_INDEX $F_PRIV_IP:443 --api-key $L_API_KEY
+}
+health_check()
+{
+F_SERVER_LIST=()
+F_SERVER_SIZE=0
+F_DOWN_SERVER=0
+F_UP_SERVER=0
+
+
+# Check server port 80
+while read line; do  
+    F_SERVER_LIST[$c]="$line"
+    c=$((c+1))
+done < <(linode nodebalancer node-list --port 80 --label $L_LOADBALANCER_NAME --api-key=$L_API_KEY | tail -n +5 | grep -v "\-" |  awk '{ print $4 }')
+
+F_SERVER_SIZE=${#F_SERVER_LIST[@]}
+
+for (( i = 0 ; i < $F_SERVER_SIZE ; i++ )) ; do
+    F_SERVER_STATUS=${F_SERVER_LIST[$i]}
+    if [[ $F_SERVER_STATUS == "DOWN" ]]; then
+        F_DOWN_SERVER=$((F_DOWN_SERVER+1))
+    fi
+    if [[ $F_SERVER_STATUS == "UP" ]]; then 
+        F_UP_SERVER=$((F_UP_SERVER+1))
+    fi
+done
+# Check server status
+
+echo "Down servers : $F_DOWN_SERVER"
+echo "Up servers : $F_UP_SERVER"
+
+
+# IF Up servers < Down servers => add node process
+if (( $(($F_UP_SERVER)) <= $(($F_DOWN_SERVER)) )) ; then 
+    # echo "Need clustered"
+    # echo $(($F_UP_SERVER))
+    # echo $F_DOWN_SERVER
+    echo "Adding Cluster.."
+    # add_cluster
+else
+    # echo $(($F_UP_SERVER))
+    # echo $F_DOWN_SERVER
+    echo "Server status is OK"
+fi
+
+}
+health_check
