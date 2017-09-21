@@ -1,2 +1,10 @@
 # linode-nodebalanacer-autoscale
-Linode Autoscaling script with linode-cli v3, 
+
+## Requirements
+- linode-cli
+- Bash shell
+
+## Features
+- Health check 
+- Create Linode with Stackscript, and Private IP
+- Add node to Nodebalancer
