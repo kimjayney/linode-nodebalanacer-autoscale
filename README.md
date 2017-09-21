@@ -1,5 +1,6 @@
 # linode-nodebalanacer-autoscale
-
+## Purpose
+- High Availability
 ## Requirements
 - linode-cli
 - Bash shell
