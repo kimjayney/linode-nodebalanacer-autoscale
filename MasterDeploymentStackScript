@@ -1,0 +1,79 @@
+#!/bin/bash
+
+# <UDF name="APIKEY" label="linode API Key"/>
+# <UDF name="NODENAME" label="linoder name"/>
+# <UDF name="DOMAIN" label="HTTPS domain"/>
+# <UDF name="DEPLOYER_PASSWORD" label="Deployer password"/>
+
+
+cd ~
+
+bash -s > Stackscript.log << 'INITEOF'
+yum install epel-release git yum-utils  -y
+sudo yum-config-manager \
+    --add-repo \
+    https://download.docker.com/linux/centos/docker-ce.repo
+
+# Install linode-cli Depend packages on https-cert-communicate 
+sudo yum install linode-cli nginx expect docker-ce perl-Crypt-SSLeay perl-LWP-Protocol-https -y
+
+sudo systemctl start docker
+service nginx restart
+
+F_PRIV_IP_DATA=$(linode IP-Add $NODENAME --api-key $APIKEY --private) # Assign new private IP to node
+F_PRIV_IP=$(echo $F_PRIV_IP_DATA | awk '{ print $3 }')
+
+
+echo "Private IP $F_PRIV_IP created"
+
+echo "" >> /etc/sysconfig/network-scripts/ifcfg-eth0
+echo "IPADDR1=$F_PRIV_IP" >> /etc/sysconfig/network-scripts/ifcfg-eth0
+echo "PREFIX1=17" >> /etc/sysconfig/network-scripts/ifcfg-eth0
+/etc/init.d/network restart
+
+echo "Network script set completed."
+
+# nodebalancer must be created with name backend-loadbalancer
+linode nodebalancer config-create backend-loadbalancer --port 80 --protocol http --api-key $APIKEY
+linode nodebalancer config-create backend-loadbalancer --port 443 --protocol http --api-key $APIKEY
+
+# connect SSL Node to nodebalancer
+linode nodebalancer node-create backend-loadbalancer 80 app$NODENAME $F_PRIV_IP:80 --api-key $APIKEY 
+linode nodebalancer node-create backend-loadbalancer 443 app$NODENAME $F_PRIV_IP:80 --api-key $APIKEY
+
+while true;do 
+  http_status=$(curl --write-out %{http_code} --silent --output /dev/null $DOMAIN)
+  sleep 1
+  if [[ "$http_status" == "200" ]]; then
+    break
+  else
+    echo "Checking $DOMAIN nodebalancer.. $http_status"
+  fi
+done
+
+# acme.sh SSL 
+docker run --rm -itd  \
+-v "$(pwd)/out":/acme.sh  \
+-v "/usr/share/nginx/html/":/public_html \
+--net=host \
+--name=acme.sh \
+neilpang/acme.sh daemon 
+
+docker exec acme.sh --issue -d $DOMAIN -w /public_html
+
+# Update nodebalancer settings to 443 
+linode nodebalancer config-update --label backend-loadbalancer --protocol https --port 443 --ssl-cert ~/out/$DOMAIN/fullchain.cer --ssl-key ~/out/$DOMAIN/$DOMAIN.key --api-key $APIKEY
+
+linode nodebalancer node-delete backend-loadbalancer 80 app$NODENAME $F_PRIV_IP:80 --api-key $APIKEY 
+linode nodebalancer node-delete backend-loadbalancer 443 app$NODENAME $F_PRIV_IP:80 --api-key $APIKEY
+
+sudo groupadd docker
+
+adduser deployer
+echo "$DEPLOYER_PASSWORD" | passwd deployer --stdin
+sudo groupadd docker
+sudo gpasswd -a $USER docker
+su deployer
+mkdir -p ~/deployment
+exit
+INITEOF 
