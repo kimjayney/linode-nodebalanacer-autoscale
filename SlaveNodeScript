@@ -1,0 +1,52 @@
+#!/bin/bash
+
+# <UDF name="APIKEY" label="linode API Key"/>
+# <UDF name="NODENAME" label="linode name"/>
+# <UDF name="MASTERIP" label="Master private IP for Deployment Process" />
+# <UDF name="MASTERPASS" label="Master cluster host password" />
+
+cd ~
+
+bash -s > Stackscript.log << 'INITEOF'
+
+# Init, Connect to nodebalancer Progress
+sudo yum install epel-release git yum-utils nginx -y
+sudo yum install linode-cli perl-Crypt-SSLeay perl-LWP-Protocol-https sshpass -y
+F_PRIV_IP_DATA=$(linode IP-Add $NODENAME --api-key $APIKEY --private) # Assign new private IP to node
+F_PRIV_IP=$(echo $F_PRIV_IP_DATA | awk '{ print $3 }')
+echo "Private IP $F_PRIV_IP created"
+echo "" >> /etc/sysconfig/network-scripts/ifcfg-eth0
+echo "IPADDR1=$F_PRIV_IP" >> /etc/sysconfig/network-scripts/ifcfg-eth0
+echo "PREFIX1=17" >> /etc/sysconfig/network-scripts/ifcfg-eth0
+/etc/init.d/network restart
+echo "Network script set completed."
+# nodebalancer must be created with name backend-loadbalancer
+linode nodebalancer config-create backend-loadbalancer --port 80 --protocol http --api-key $APIKEY
+# connect SSL Node to nodebalancer
+linode nodebalancer node-create backend-loadbalancer 80 app$NODENAME $F_PRIV_IP:80 --api-key $APIKEY 
+
+# Install Docker community edition latest
+sudo yum install -y yum-utils \
+  device-mapper-persistent-data \
+  lvm2
+
+sudo yum-config-manager \
+    --add-repo \
+    https://download.docker.com/linux/centos/docker-ce.repo
+sudo yum install docker-ce -y
+sudo systemctl start docker
+sudo chkconfig docker on
+sudo service nginx restart >> $logfile
+sudo firewall-cmd --permanent --zone=public --add-service=http 
+sudo firewall-cmd --permanent --zone=public --add-service=https
+sudo firewall-cmd --reload
+
+# Construct Deployment infrastructure
+sudo yum install fuse-sshfs -y
+mkdir -p /root/deployment
+ssh-keygen -f $HOME/.ssh/id_rsa -t rsa -N ''
+bash -c "sshpass -p $MASTERPASS ssh-copy-id -o 'StrictHostKeyChecking no' deployer@$MASTERIP"
+sshfs deployer@$MASTERIP:/home/deployer/deployment /root/deployment
+
+exit
+INITEOF
